@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="gu">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Student QR Scanner and SMS Sender</title>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <script src="https://unpkg.com/html5-qrcode" type="text/javascript"></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    #qr-reader { width: 300px; margin-bottom: 20px; }
+  </style>
+</head>
+<body>
+  <h2>QR Code Scan and Send SMS</h2>
+  <div id="qr-reader"></div>
+  <div id="qr-reader-results"></div>
+
+  <button onclick="sendAbsentSMS()">Send Absent SMS</button>
+  <input type="text" id="absentRoll" placeholder="Enter Roll Number"><br><br>
+
+  <button onclick="document.getElementById('csvUpload').click()">Upload CSV</button>
+  <input type="file" id="csvUpload" accept=".csv" style="display:none">
+  <br><br>
+
+  <button onclick="addStudentManually()">Add Student Manually</button>
+  <br><br>
+  <input type="text" id="roll" placeholder="Roll Number">
+  <input type="text" id="name" placeholder="Student Name">
+  <input type="text" id="phone" placeholder="Parent Phone">
+  <br><br>
+
+  <button onclick="resetTodayScans()">Reset Today's Scans</button>
+  <button onclick="downloadScanHistory()">Download Scan History</button>
+
+  <script>
+    const firebaseConfig = {
+      apiKey: "AIzaSyCZOFERCKXZYjgpZiTiEcvBsRsHcH8o19E",
+      authDomain: "sms-send-2879d.firebaseapp.com",
+      databaseURL: "https://sms-send-2879d-default-rtdb.firebaseio.com",
+      projectId: "sms-send-2879d",
+      storageBucket: "sms-send-2879d.firebasestorage.app",
+      messagingSenderId: "864005703611",
+      appId: "1:864005703611:web:738bef256e262796f7669e",
+      measurementId: "G-JZQZZ132N4"
+    };
+
+    firebase.initializeApp(firebaseConfig);
+    const db = firebase.database();
+
+    const scannedRolls = new Set();
+    const scanHistory = [];
+
+    function sendSMS(roll) {
+      db.ref('students/' + roll).once('value').then(snapshot => {
+        if (!snapshot.exists()) return alert('Student not found');
+        const data = snapshot.val();
+        const name = data.name;
+        const phone = data.parent_phone;
+        const date = new Date().toLocaleDateString('gu-IN');
+        const msg = `Namaskar !! Apnu Balak ${name} Aaje ${date} Na roj Shalama HAjar Che.\nThank you\nNikunj Savani (Class Teacher)`;
+        window.location.href = `sms:${phone}?body=${encodeURIComponent(msg)}`;
+        logScan(roll, name, phone, date);
+      });
+    }
+
+    function sendAbsentSMS() {
+      const roll = document.getElementById('absentRoll').value;
+      db.ref('students/' + roll).once('value').then(snapshot => {
+        if (!snapshot.exists()) return alert('Student not found');
+        const data = snapshot.val();
+        const name = data.name;
+        const phone = data.parent_phone;
+        const date = new Date().toLocaleDateString('gu-IN');
+        const msg = `Namaskar !! Apnu Balak ${name} Aaje ${date} Shalama Hajar Nathi.\nPlease contact school.\nThank you\nNikunj Savani (Class Teacher)`;
+        window.location.href = `sms:${phone}?body=${encodeURIComponent(msg)}`;
+        logScan(roll, name, phone, date, true);
+      });
+    }
+
+    function addStudentManually() {
+      const roll = document.getElementById('roll').value;
+      const name = document.getElementById('name').value;
+      const phone = document.getElementById('phone').value;
+      if (roll && name && phone) {
+        db.ref('students/' + roll).set({ name, parent_phone: phone });
+        alert('Student added successfully');
+      } else {
+        alert('Please fill all fields');
+      }
+    }
+
+    document.getElementById('csvUpload').addEventListener('change', function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const rows = e.target.result.split('\n');
+        rows.forEach(row => {
+          const [roll, name, phone] = row.split(',');
+          if (roll && name && phone) {
+            db.ref('students/' + roll.trim()).set({ name: name.trim(), parent_phone: phone.trim() });
+          }
+        });
+        alert('CSV uploaded and data saved');
+      };
+      reader.readAsText(file);
+    });
+
+    function onScanSuccess(decodedText, decodedResult) {
+      const roll = decodedText.trim();
+      if (scannedRolls.has(roll)) {
+        console.log(`Roll ${roll} already scanned recently.`);
+        return;
+      }
+
+      scannedRolls.add(roll);
+      setTimeout(() => scannedRolls.delete(roll), 30000);
+
+      document.getElementById('qr-reader-results').innerText = `Scanned Roll No: ${roll}`;
+      db.ref('students/' + roll).once('value').then(snapshot => {
+        if (!snapshot.exists()) {
+          alert('Student not found in database.');
+          return;
+        }
+        const data = snapshot.val();
+        const name = data.name;
+        const phone = data.parent_phone;
+        const date = new Date().toLocaleDateString('gu-IN');
+        const msg = `Namaskar !! Apnu Balak ${name} Aaje ${date} Shalama Hajar Che.\nThank you\nNikunj Savani (Class Teacher)`;
+        window.location.href = `sms:${phone}?body=${encodeURIComponent(msg)}`;
+        logScan(roll, name, phone, date);
+      });
+    }
+
+    function logScan(roll, name, phone, date, absent = false) {
+      scanHistory.push({ roll, name, phone, date, status: absent ? 'Absent' : 'Present' });
+    }
+
+    function resetTodayScans() {
+      scannedRolls.clear();
+      alert('Today\'s scan records cleared. You can re-scan all students.');
+    }
+
+    function downloadScanHistory() {
+      let csv = 'Roll,Name,Phone,Date,Status\n';
+      scanHistory.forEach(entry => {
+        csv += `${entry.roll},${entry.name},${entry.phone},${entry.date},${entry.status}\n`;
+      });
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'scan_history.csv';
+      a.click();
+    }
+
+    const html5QrcodeScanner = new Html5QrcodeScanner(
+      "qr-reader", { fps: 10, qrbox: 250 }, false);
+    html5QrcodeScanner.render(onScanSuccess);
+  </script>
+</body>
+</html>
